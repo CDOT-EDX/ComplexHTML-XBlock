@@ -212,7 +212,7 @@ class ComplexHTMLXBlock(XBlock):
         """
         pattern_order = [1,0,1,2,1,5,1,4,1,3]
         if data['pattern_index']:
-        return {"answer": }
+            return {"answer": true}
 
     @XBlock.json_handler
     def get_user_data(self, data, suffix=''):
