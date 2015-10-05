@@ -8,6 +8,7 @@ import urllib, datetime, json, smtplib, urllib2
 import matplotlib.pyplot as plt
 import numpy as np
 from pylab import *
+from pymongo import MongoClient
 from email.MIMEMultipart import MIMEMultipart
 from email.MIMEText import MIMEText
 from email.MIMEImage import MIMEImage
@@ -16,9 +17,9 @@ from django.template import Context, Template
 from xblock.core import XBlock
 from xblock.fields import Scope, Integer, List, String, Boolean, Dict
 from xblock.fragment import Fragment
-from xmodule.fields import RelativeTime
 
 class ComplexHTMLXBlock(XBlock):
+
 
     mysql_database  = 'edxapp'
     mysql_user      = 'root'
@@ -221,7 +222,6 @@ class ComplexHTMLXBlock(XBlock):
         """
         import dbconnection
 
-
         # init default data
         user_id    = "None"
         course_id  = "None"
@@ -262,9 +262,9 @@ class ComplexHTMLXBlock(XBlock):
         db.query(q)
         res = db.fetchall()
         for row in res:
-            print row
+            #print row
             user_name = row[0]
-        print user_name
+        #print user_name
         # email
         q = "SELECT email FROM auth_user WHERE id='%s' " % (user_id)
         db.query(q)
@@ -289,16 +289,34 @@ class ComplexHTMLXBlock(XBlock):
         msgImage.add_header('Content-ID', '<image1>')
         msgRoot.attach(msgImage)
         try:
-            print ("INside")
+            #print ("INside")
+            self.mongo_connection(self.qz_attempted)
             smtpObj = smtplib.SMTP('localhost', 25)
             smtpObj.ehlo()
             smtpObj.sendmail(strFrom, strTo, msgRoot.as_string())
             smtpObj.quit()
-            print ("Success")
+            #print ("Success")
         except:
             print ("Error")
         return {'user': user_email}
-
+    def mongo_connection(self, data):
+        """
+        Connection to mongodb
+        """
+        print ("Before mongo")
+        #print data["quiz_id"]
+        client = MongoClient()
+        db = client.edxapp
+        kc = db.kc
+        quizzes = db.quizzes
+        students = db.students
+        kc_cursor = kc.find({})
+        quiz_cursor = quizzes.find({})
+        quiz_info = {"name": data["quiz_id"], "showanswer": "try again"}
+        db.quizzes.insert(quiz_info)
+        for i in quiz_cursor:
+            print ("Inside mongo")
+            print i
     @XBlock.json_handler
     def clear_data(self, data, suffix=''):
         """
@@ -562,11 +580,12 @@ class ComplexHTMLXBlock(XBlock):
                     for answer in quiz["json"]["questions"]:
                         for index, value in enumerate(answer["a"]):
                             if int(self.qz_attempted['correct']) == int(self.qz_attempted['selected']):
-                                correct_and_reason.update({'correct': 'true' })
+                                correct_and_reason.update({'correct': 'true'})
                             else:
-                                correct_and_reason.update({'correct': 'false' })
-        return {"quiz_result_id":correct_and_reason}
-
+                                correct_and_reason.update({'correct': 'false'})
+        for i in self.qz_attempted:
+            print i
+        return {"quiz_result_id": correct_and_reason}
     def student_view(self, context=None):
         """
         The student view
@@ -574,6 +593,7 @@ class ComplexHTMLXBlock(XBlock):
 
         fragment = Fragment()
         content = {'self': self}
+        self.n_user_id = self.get_student_id()
 
         # copy over body_json to settings_student if the latter is blank
         if self.settings_student == "":
@@ -628,7 +648,6 @@ class ComplexHTMLXBlock(XBlock):
         fragment = Fragment()
         content = json.loads(load_resource("static/studio_settings.json"))
         content['self'] = self
-        self.n_user_id = self.get_student_id()
 
         try:
             urllib2.urlopen(content["CKEDITOR_URL"])
