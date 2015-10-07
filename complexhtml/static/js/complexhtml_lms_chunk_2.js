@@ -4,25 +4,21 @@ $(function ($) {
 
     console.log("on page load from chunk2");
     getCleanBody(function(){
-        console.log("Before");
-        console.log("After");
         anySlide = new AVIATION.common.Slide();
         anySlide.constructor(json_clean_setting);
         console.log("JSON");
         console.log(json_clean_setting);
         json_clean_setting.parentSlide = anySlide;
+        var selected = [];
         $(anySlide).on("completedQuiz", function(selectedAnswers){
+            var checked;
     		$(".answers input:checked").each(function(index, value){
-            console.log('wow');
-            console.log($(this).attr('id'));
             checked = $(this).attr('id');
+            selected.push(parseInt(checked.split('_')[3]));
             });
-            console.log("checked");
-            console.log(checked);
-            var sel = checked.split('_');
-            var selected = sel[3];
-
-	    console.log("Got");
+        if (selected.length == 1){
+            selected = selected[0];
+        }
         checkQuizResult(checked,selected);
 	    sendEmail();
         });

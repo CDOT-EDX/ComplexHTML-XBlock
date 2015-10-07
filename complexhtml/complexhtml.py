@@ -579,7 +579,7 @@ class ComplexHTMLXBlock(XBlock):
                 for quiz in body_json["quizzes"]:
                     for answer in quiz["json"]["questions"]:
                         for index, value in enumerate(answer["a"]):
-                            if int(self.qz_attempted['correct']) == int(self.qz_attempted['selected']):
+                            if self.qz_attempted['correct'] == self.qz_attempted['selected']:
                                 correct_and_reason.update({'correct': 'true'})
                             else:
                                 correct_and_reason.update({'correct': 'false'})
