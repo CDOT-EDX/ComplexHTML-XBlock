@@ -206,14 +206,6 @@ class ComplexHTMLXBlock(XBlock):
             print ("= ComplexHTML: +--" + str(i))
 
         return content
-    @XBlock.json_handler
-    def get_scanpattern_array(self, data, suffix=''):
-        """
-        Get scanning pattern index and send back right or wrong answer
-        """
-        pattern_order = [1,0,1,2,1,5,1,4,1,3]
-        if data['pattern_index']:
-            return {"answer": true}
 
     @XBlock.json_handler
     def get_user_data(self, data, suffix=''):
@@ -290,7 +282,6 @@ class ComplexHTMLXBlock(XBlock):
         msgRoot.attach(msgImage)
         try:
             #print ("INside")
-            self.mongo_connection(self.qz_attempted)
             smtpObj = smtplib.SMTP('localhost', 25)
             smtpObj.ehlo()
             smtpObj.sendmail(strFrom, strTo, msgRoot.as_string())
@@ -299,24 +290,26 @@ class ComplexHTMLXBlock(XBlock):
         except:
             print ("Error")
         return {'user': user_email}
-    def mongo_connection(self, data):
+    def mongo_connection(self, data, collection):
         """
         Connection to mongodb
         """
-        print ("Before mongo")
-        #print data["quiz_id"]
-        client = MongoClient()
-        db = client.edxapp
-        kc = db.kc
-        quizzes = db.quizzes
-        students = db.students
-        kc_cursor = kc.find({})
-        quiz_cursor = quizzes.find({})
-        quiz_info = {"name": data["quiz_id"], "showanswer": "try again"}
-        db.quizzes.insert(quiz_info)
-        for i in quiz_cursor:
-            print ("Inside mongo")
-            print i
+        if collection != "":
+            print ("Before mongo")
+            print(collection)
+            #print data["quiz_id"]
+            client = MongoClient()
+            db = client.edxapp
+            collection_name = db.collection
+            collection_cursor = collection_name.find()
+            for result in collection_cursor:
+                print (result)
+            print ("End of the mongo")
+            #quiz_info = {"name": data["quiz_id"], "showanswer": "try again"}
+            #db.quizzes.insert(quiz_info)
+            #for i in quiz_cursor:
+                #print ("Inside mongo")
+                #print i
     @XBlock.json_handler
     def clear_data(self, data, suffix=''):
         """
@@ -554,6 +547,7 @@ class ComplexHTMLXBlock(XBlock):
     def get_clean_body_json(self, data, suffix=''):
         body_json = json.loads(self.settings_student)
         return {"body_json_clean": body_json}
+
     def get_student_id(self):
         """
          Get data from student_id
@@ -568,27 +562,38 @@ class ComplexHTMLXBlock(XBlock):
         return s_id
 
     @XBlock.json_handler
-    def get_quiz_attempts(self, data, suffix=''):
+    def get_quiz_attempts(self, data, suffix =''):
         correct_and_reason = {}
         body_json = json.loads(self.body_json)
         if data['ch_question']:
             self.qz_attempted = data['ch_question'].copy()
-        selected = self.qz_attempted['selected'];
-        correct  = self.qz_attempted['correct'];
+            self.get_conditionals()
         for index, value in enumerate(body_json["quizzes"]):
-            print self.qz_attempted['selectedId2']
+            print(self.qz_attempted['selectedId2'])
             if index == int(self.qz_attempted["selectedId2"]):
                 for quiz in body_json["quizzes"]:
                     for answer in quiz["json"]["questions"]:
                         for index, value in enumerate(answer["a"]):
-                            if ((answer.get('select_any', False) and selected in correct) or
-                                selected == correct):
+                            if int(self.qz_attempted['correct']) == int(self.qz_attempted['selected']):
                                 correct_and_reason.update({'correct': 'true'})
                             else:
                                 correct_and_reason.update({'correct': 'false'})
-        for i in self.qz_attempted:
-            print i
         return {"quiz_result_id": correct_and_reason}
+
+    def get_conditionals(self):
+        """
+        Get conditionals from instructor
+        """
+        conditionals = []
+        print("SELF")
+        con_json = json.loads(self.body_json)
+        for condition in con_json["conditions"]:
+            conditionals.append(condition)
+        for condition in conditionals:
+            print (condition)
+        self.mongo_connection(condition, "quizzes")
+        return {"quiz_ids" : {} , "slideIds" : {}}
+
     def student_view(self, context=None):
         """
         The student view

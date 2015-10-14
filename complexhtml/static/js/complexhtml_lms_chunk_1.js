@@ -150,16 +150,6 @@ function sendEmail(){
 
 }
 
-function checkScanPattern(){
-    $.ajax({
-        type: "POST",
-        url: runtime.handlerUrl(xblock_element, 'get_scanpattern_array'),
-        data: JSON.stringify({'pattern_index': pattern_index}),
-        success: function(result){
-           $(anySlide).trigger('checkCompleted', result);
-        }
-    });
-}
 
 function checkQuizResult(selectedId, selected){
     var answer = [];
@@ -168,19 +158,18 @@ function checkQuizResult(selectedId, selected){
     console.log(answer[j]);
     }
     var quiz_id = $('.cdot_quiz').attr('id');
-    var selectedId2 = parseInt(selectedId.split('_')[1]);
+    var selectedId1 = selectedId.split('_');
+    console.log(selectedId1);
+    var selectedId2 = parseInt(selectedId1[1]);
     console.log(selectedId2);
-    var correct = [];
         for (var j= 0; j < answer[selectedId2].length; j++){
             console.log(answer[selectedId2][j].correct);
          if (answer[selectedId2][j].correct){
-            correct.push(parseInt(j));
+            var correct = parseInt(j);
             console.log("Check correct");
             console.log(correct);
+            break;
              }
-        }
-        if (correct.length == 1){
-            correct = correct[0];
         }
     var ch_question = {quiz_id, selectedId2, selected, correct};
     console.log(ch_question);
