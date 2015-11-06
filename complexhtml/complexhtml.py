@@ -4,23 +4,21 @@ Author: Raymond Lucian Blaga
 Description: An HTML, JavaScript and CSS Editing XBlock that records student interactions if the course author wishes it.
 """
 
-import urllib, datetime, json, smtplib, urllib2
+import urllib, datetime, json, smtplib, urllib2, sys, os, collections
 import matplotlib.pyplot as plt
 import numpy as np
-from bson import ObjectId
 from pylab import *
 from pymongo import MongoClient
 from email.MIMEMultipart import MIMEMultipart
 from email.MIMEText import MIMEText
 from email.MIMEImage import MIMEImage
-from .utils import render_template, load_resource, resource_string
+from .utils import render_template, load_resource
 from django.template import Context, Template
 from xblock.core import XBlock
 from xblock.fields import Scope, Integer, List, String, Boolean, Dict
 from xblock.fragment import Fragment
 
 class ComplexHTMLXBlock(XBlock):
-
 
     mysql_database  = 'edxapp'
     mysql_user      = 'root'
@@ -138,6 +136,12 @@ class ComplexHTMLXBlock(XBlock):
     n_user_id = String(
 	display_name="UserId", default="0", scope=Scope.user_state, help="Id of the current user"
     )
+    course_id = String(
+    default="None", scope=Scope.user_state, help="Id of the current course"
+    )
+    conditional_id = Boolean(
+        display_name = "Conditional", default = False, scope=Scope.user_state
+    )
 
     has_score = True
     icon_class = 'other'
@@ -217,7 +221,6 @@ class ComplexHTMLXBlock(XBlock):
 
         # init default data
         user_id    = "None"
-        course_id  = "None"
         user_name  = "None"
         user_email = "None"
         course_ids = "None"
@@ -229,7 +232,7 @@ class ComplexHTMLXBlock(XBlock):
         res = db.fetchall()
         for row in res:
             user_id   = row[1]
-            course_id = row[2]
+            self.course_id = row[2]
         print user_id
         q = "SELECT course_id FROM student_courseenrollment WHERE user_id='%s' " % (user_id)
         db.query(q)
@@ -291,28 +294,204 @@ class ComplexHTMLXBlock(XBlock):
         except:
             print ("Error")
         return {'user': user_email}
-    def mongo_connection(self, data, collection):
+
+    def mongo_connection(self):
         """
         Connection to mongodb
         """
+        client = MongoClient()
+        db = client.edxapp
+        return db
 
-        if collection != "":
-            print ("Before mongo")
-            client = MongoClient()
-            db = client.edxapp
-            if data and collection == "quizzes":
-                for dict in data:
-                    for slideId in dict:
-                        print (dict.get(slideId).get("quizId"))
-            elif data and collection == "students":
-                if db.students.find({"student_id" : data["student_id"], "quizzes": data["quizid"]}):
-                    cursor = db.students.find({"student_id" : data["student_id"], "quizzes": data["quizid"]})
-                    for object in cursor:
-                        attempt = int(object["attempts"])
-                    attempt += 1
-                    db.students.update({"attempts": object["attempts"]} , {"$set": {"attempts" : attempt}})
-                print ("Mongo student")
-            print ("End of the mongo")
+    def toSlidesColection(self):
+        """
+        Write to Slides collection
+        """
+        db = self.mongo_connection()
+        chapter = self.get_chapter()
+        sequential = self.get_sequential()
+        vertical = self.get_vertical()
+        dict_course = self.getDictCompleteCourseData(db.modulestore)
+        snap_list = self.get_snaps(dict_course, chapter)
+        slide_list = self.get_slides(dict_course, sequential)
+        print("SLIDE")
+        slide = db.slides.find()
+        if (slide):
+            print ("Hello")
+        else:
+            db.slides.insert({"_id" : slide_list["name"], "kc": {""}})
+        module_structure = {"chapter" : chapter, "sequential" : sequential, "vertical" : vertical}
+
+    def toStudentsCollection(self, data):
+        """
+        Write to Students collection
+        """
+        if data:
+            db = self.mongo_connection()
+            student = db.students.find_one({"student_id" : data["student_id"], "quizzes" : data["quizid"]})
+            if (student):
+                attempt = student["attempts"]
+                attempt += 1
+                db.students.update({"attempts": student["attempts"]} , {"$set": {"attempts" : attempt}})
+            else:
+                db.students.insert({"student_id" : data["student_id"], "quizzes" : data["quizid"], "type" : data["type"], "attempts" : data["attempts"]})
+            return {"student" : student}
+
+    def toQuizzesCollection(self, data):
+        """
+        Write to Quizzes collection
+        """
+        if data:
+            db = self.mongo_connection()
+            for dict in data:
+                for slideId in dict:
+                    print (dict.get(slideId).get("quizId"))
+
+    def setParseCourseId(self):
+        """
+        Parse course_id name
+        """
+        if self.course_id !='' and self.course_id !='None':
+            course  = self.course_id.split('/')
+            corg= course[0]
+            ccourse = course[1]
+            cname = course[2]
+            if corg!='' and ccourse!='' and cname!='':
+                return course
+            else:
+                return ''
+
+    def getDictCompleteCourseData(self,conn):
+        """
+        Get all data from mongo database
+        for the given course as a dictionary
+        """
+        course = self.setParseCourseId()
+        dict_course = []
+        if course!='':
+            corg = course[0]
+            ccourse = course[1]
+            cname = course[2]
+            res_query = conn.find({'_id.org': ''+corg+'', '_id.course': ''+ccourse+'' }, {'definition.children':1, 'definition.data.bg_id':1, 'metadata.weight':1})
+            if res_query:
+                for item in res_query:
+                    dict_course.append( self.getRecursiveData(item) )
+        return dict_course
+
+    def getRecursiveData(self,data):
+        """
+        Get data recursively
+        """
+        if isinstance(data, basestring):
+            return str(data)
+        elif isinstance(data, collections.Mapping):
+            return dict(map(self.getRecursiveData, data.iteritems()))
+        elif isinstance(data, collections.Iterable):
+            return type(data)(map(self.getRecursiveData, data))
+        else:
+            return data
+
+    def fetchPatternAndQuiz(self, data):
+        """
+        Fetch pattern id and quiz id from SlideId collection
+        """
+        db = self.mongo_connection()
+        slides = db.slides.find()
+        slideId = self.get_vertical()
+        quizWeight = 0
+        patternWeight = 0
+        print ("ActionID")
+        for key, value in enumerate(slides):
+            if value["_id"] == slideId:
+                quizList = value["quiz"]
+                for quiz in quizList:
+                    if int(quiz["id"]) == data["quizId"]:
+                        print ("Let see what's inside")
+                        quizWeight += int(quiz["weight"])
+                        print (quizWeight)
+                    print ("Success")
+                patternList = value["pattern"]
+                for pattern in patternList:
+                    if int(pattern["id"]) == data["patternId"] :
+                        print ("Patternweight")
+                        patternWeight += int(pattern["weight"])
+                        print patternWeight
+        self.calculateTotalWeight(quizWeight, patternWeight )
+
+    def calculateTotalWeight(self, quizWeight, patternWeight, suffix=''):
+        """
+        Calculate total weight for knowledge component on slide
+        """
+        total = 0
+        print quizWeight
+        print patternWeight
+        total = quizWeight + patternWeight
+        print("Total")
+        print(total)
+        if total >= 80:
+            self.conditional_id = True
+        print("Conditional")
+        print(self.conditional_id)
+
+    @XBlock.json_handler
+    def to_Send(self, data, suffix=''):
+        """
+        Function that sends the condition of to proceed or not to next slide
+        """
+        return {"conditional_id" : self.conditional_id}
+
+    def get_chapter(self):
+        """
+        Get current chapter from parent runtime
+        """
+        parent = self.get_parent()
+        chapter = str(parent.get_parent().parent).split("/")[::-1][0]
+        return chapter
+
+    def get_sequential(self):
+        """
+        Get current sequential from parent runtime
+        """
+        parent = self.get_parent()
+        sequential = str(parent.parent).split("/")[::-1][0]
+        return sequential
+
+    def get_vertical(self):
+        """
+       Get current vertical from parent runtime
+       """
+        vertical = str(self.parent).split("/")[::-1][0]
+        return vertical
+
+    def get_snaps(self,dict_course, sequential):
+        """
+        Get Snaps from current chapter
+        """
+        snap_list = []
+        if len(dict_course) > 0:
+            for key, value in enumerate(dict_course):
+                if value.get("_id")["name"] == sequential and value.get("_id")["category"] == 'chapter':
+                    children = value.get("definition")["children"]
+                    if len(children) > 0:
+                        for snap in children:
+                            slides = self.get_slides(dict_course,snap.split('/')[::-1][0])
+                            snap_list.append({"category" : "snap", "module_id" : snap, "name" : snap.split("/")[::-1][0], "slides": slides})
+        return snap_list
+
+    def get_slides(self, dict_course, chapter):
+        """
+        Get Slides from current chapter
+        """
+        slide_list = []
+        if len(dict_course) > 0:
+            for key, value in enumerate(dict_course):
+                if value.get('_id')['name']==chapter and value.get('_id')['category']=='sequential':
+                    children = value.get('definition')['children']
+                    if len(children) > 0:
+                        for k in children:
+                            slide_list.append( {'category': 'slide', 'module_id' : k, 'name' : k.split('/')[::-1][0]})
+        return slide_list
+
     @XBlock.json_handler
     def clear_data(self, data, suffix=''):
         """
@@ -566,11 +745,14 @@ class ComplexHTMLXBlock(XBlock):
 
     @XBlock.json_handler
     def get_quiz_attempts(self, data, suffix =''):
+
         correct_and_reason = {}
         quiz_attempts = {}
-        attempt = 0
+        attempt = 1
         body_json = json.loads(self.body_json)
         quizId = 0
+        patternId = 0
+        actionId = False
         student_id = self.get_student_id()
         print("Student_id")
         print(student_id)
@@ -580,12 +762,15 @@ class ComplexHTMLXBlock(XBlock):
             for key, value in data['ch_question'].iteritems():
                 if key == "selectedQuizId":
                    quizId = int(value)
+                if key == "patternId":
+                    patternId = value
+                if key == "actionId":
+                    actionId = value
             print("Quiz value")
             quiz_type = data["ch_question"]["quiz_id"].split("_")
             quiz_attempts.update({'student_id' : student_id, 'quizid' : quizId, 'attempts' : attempt, "type": quiz_type[0]})
-            self.mongo_connection(quiz_attempts, "students")
+            self.toStudentsCollection(quiz_attempts)
             self.qz_attempted = data['ch_question'].copy()
-            self.get_conditionals()
         for item in xrange(len(body_json["quizzes"])):
 
             if item == int(self.qz_attempted["selectedQuizId"]):
@@ -593,26 +778,14 @@ class ComplexHTMLXBlock(XBlock):
                     correct_and_reason.update({'correct': 'true'})
                 else:
                     correct_and_reason.update({'correct': 'false'})
+        result = {"quizId": quizId, "patternId": patternId, "actionId": actionId}
+        self.fetchPatternAndQuiz(result)
         print("Queue")
         print("Before")
         print quiz_attempts
         print("End of attempts")
         return {"quiz_result_id": correct_and_reason}
 
-    def get_conditionals(self):
-        """
-        Get conditionals from instructor
-        """
-        conditionals = []
-        print("SELF")
-        con_json = json.loads(self.body_json)
-        if con_json["conditions"]:
-            for condition in con_json["conditions"]:
-                conditionals.append(condition)
-            for condition in conditionals:
-                print (condition)
-            self.mongo_connection(conditionals, "quizzes")
-        return {"quiz_ids" : {} , "slideIds" : {}}
 
     def student_view(self, context=None):
         """
