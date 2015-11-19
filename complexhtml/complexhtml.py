@@ -771,10 +771,13 @@ class ComplexHTMLXBlock(XBlock):
             quiz_attempts.update({'student_id' : student_id, 'quizid' : quizId, 'attempts' : attempt, "type": quiz_type[0]})
             self.toStudentsCollection(quiz_attempts)
             self.qz_attempted = data['ch_question'].copy()
+        selected = self.qz_attempted['selected'];
+        correct  = self.qz_attempted['correct'];
         for item in xrange(len(body_json["quizzes"])):
 
             if item == int(self.qz_attempted["selectedQuizId"]):
-                if int(self.qz_attempted['correct']) == int(self.qz_attempted['selected']):
+                if ((answer.get('select_any', False) and selected in correct) or
+                    selected == correct):
                     correct_and_reason.update({'correct': 'true'})
                 else:
                     correct_and_reason.update({'correct': 'false'})
