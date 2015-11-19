@@ -776,8 +776,7 @@ class ComplexHTMLXBlock(XBlock):
         for item in xrange(len(body_json["quizzes"])):
 
             if item == int(self.qz_attempted["selectedQuizId"]):
-                if ((answer.get('select_any', False) and selected in correct) or
-                    selected == correct):
+                if (body_json["quizzes"]["json"]["questions"].get('select_any', False) and selected in correct) or selected == correct:
                     correct_and_reason.update({'correct': 'true'})
                 else:
                     correct_and_reason.update({'correct': 'false'})
