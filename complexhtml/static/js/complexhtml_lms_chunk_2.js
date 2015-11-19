@@ -13,6 +13,7 @@ $(function ($) {
         var actionId = false;
         console.log(json_clean_setting);
         json_clean_setting.parentSlide = anySlide;
+        var selected = [];
         $(anySlide).on("completedQuiz", function(e,options){
 
             console.log("Before Pattern")
@@ -25,15 +26,18 @@ $(function ($) {
                 // id variable is now the id of the pattern only
                 // otherwise should all be quiz related
             } else {
+                var checked;
                 $(".answers input:checked").each(function(index, value){
                     console.log('wow');
                     console.log($(this).attr('id'));
                     checked = $(this).attr('id');
+                    console.log("checked");
+                    console.log(checked);
+                    selected.push(parseInt(checked.split('_')[3]));
                 });
-                console.log("checked");
-                console.log(checked);
-                var sel = checked.split('_');
-                var selected = sel[3];
+                if (selected.length == 1){
+                    selected = selected[0];
+                }
 
                 console.log("Got");
                 checkQuizResult(checked,selected, patternId, actionId);
