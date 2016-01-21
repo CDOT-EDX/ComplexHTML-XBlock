@@ -142,7 +142,9 @@ class ComplexHTMLXBlock(XBlock):
     conditional_id = Boolean(
         display_name = "Conditional", default = False, scope=Scope.user_state
     )
-
+    totalWeight = Integer(
+        default= 0, scope=Scope.user_state
+    )
     has_score = True
     icon_class = 'other'
 
@@ -322,27 +324,44 @@ class ComplexHTMLXBlock(XBlock):
             db.slides.insert({"_id" : slide_list["name"], "kc": {""}})
         module_structure = {"chapter" : chapter, "sequential" : sequential, "vertical" : vertical}
 
-    def toStudentsCollection(self, data):
+    def toStudentsCollection(self, data, correct_and_reason, slideid):
         """
         Write to Students collection
         """
-        # TODO add slide id to tsudent collection and add total weight for each attempt
-
         if data:
+            check = 0
+            attempt = 0
+            quiz_dict = []
+            print ("Student Collection")
+            print correct_and_reason
             db = self.mongo_connection()
-            slideid = self.vertical()
-            print "SlideId"
-            print slideid
-            student = db.students.find_one({"_id" : data["student_id"], "quizzes.index" : data["quizid"]})
-            print "Before"
-            print student
-            if (student):
-                 attempt = student.get("quizzes")["attempts"]
-                 attempt += 1
-                 db.students.update({"quizzes.attempts": student.get("quizzes")["attempts"]} , {"$set": {"quizzes.attempts" : attempt}})
+            slideid = self.get_vertical()
+            student_exists = db.students.find_one({"_id": data["student_id"]})
+            if (student_exists):
+                student = db.students.find_one({"_id" : data["student_id"], "slides.slide_id" : slideid})
+                if (student):
+                    for slide in student.get("slides"):
+                        for quiz in slide["quizzes"]:
+                            quiz_dict.append(quiz["quiz_id"])
+                            print ("Testing quizzes")
+                            print quiz["quiz_id"]
+                            print data['quizid']
+                            print ("Quiz dict")
+                            print quiz_dict
+                            print check
+                            if quiz["quiz_id"] == data['quizid']:
+                                attempt = len(quiz["attempts"])
+                                attempt += 1
+                                print attempt
+                                db.students.update({"_id": data["student_id"],"slides.slide_id": slideid, "slides.quizzes.quiz_id": data["quizid"]} , {"$push": {"slides.$.quizzes." + str(data['quizid']) + ".attempts":{"attempt": attempt, "kc": self.totalWeight, "answer_result": correct_and_reason["correct"]}}})
+                            elif check == 0 and data['quizid'] not in quiz_dict:
+                                db.students.update({"_id": data["student_id"], "slides.slide_id" : slideid} , {"$push": {"slides.$.quizzes": {"quiz_id" : data["quizid"], "attempts": [{ "attempt": 1, "kc": self.totalWeight, "answer_result":correct_and_reason["correct"]}], "type" : data["type"]}}})
+                                check += 1
+                else:
+                    db.students.update({"_id": data["student_id"]} , {"$push": {"slides":{"slide_id" : slideid, "quizzes" :[{"quiz_id" : data["quizid"], "attempts": [{ "attempt": 1, "kc": self.totalWeight, "answer_result":     correct_and_reason["correct"]}], "type" : data["type"]}]}}})
             else:
-                db.students.insert({"_id" : data["student_id"], "quizzes" : {"index" : data["quizid"], "attempts" : data["attempts"]}, "type" : data["type"]})
-        return {"student" : student}
+                db.students.insert({"_id" : data["student_id"],"slides":[{"slide_id" : slideid, "quizzes" :[{"quiz_id" : data["quizid"], "attempts": [{ "attempt":data["attempts"], "kc": self.totalWeight, "answer_result":     correct_and_reason["correct"]}], "type" : data["type"]}]}]})
+        return attempt
 
     def toQuizzesCollection(self, data):
         """
@@ -407,38 +426,68 @@ class ComplexHTMLXBlock(XBlock):
         slideId = self.get_vertical()
         quizWeight = 0
         patternWeight = 0
-        print ("ActionID")
         for key, value in enumerate(slides):
             if value["_id"] == slideId:
                 quizList = value["quiz"]
                 for quiz in quizList:
                     if int(quiz["id"]) == data["quizId"]:
-                        print ("Let see what's inside")
                         quizWeight += int(quiz["weight"])
-                        print (quizWeight)
-                    print ("Success")
                 patternList = value["pattern"]
                 for pattern in patternList:
-                    if int(pattern["id"]) == data["patternId"] :
-                        print ("Patternweight")
+                    if pattern["id"] == data["patternId"] :
                         patternWeight += int(pattern["weight"])
-                        print patternWeight
         self.calculateTotalWeight(quizWeight, patternWeight )
+
+    def fetchKcFromStudentsCollection(self, kcResultCursor):
+        if (kcResultCursor):
+            db = self.mongo_connection()
+            result = []
+            kc = 0
+            slide = ""
+            for key, studentValue in enumerate(kcResultCursor):
+                for key, quizValue in enumerate(studentValue.get("slides")):
+                    for key, slideValue in enumerate(db.modulestore.find({"_id.name" : quizValue.get("slide_id")})):
+                        slide = slideValue.get("metadata")["display_name"]
+                        for key, attemptsValue in enumerate(quizValue.get("quizzes")):
+                            kc = attemptsValue.get("attempts")[-1]["kc"]
+                        result.append({"slide_name": slide,"kc" : kc })
+        return result
+
+    def kcsToGraph(self, studentGraph):
+        #Testing
+        result = []
+        studentData = {}
+
+        db = self.mongo_connection()
+        # modulestoreCollection = db.modulestore.find()
+        #testin
+        if (studentGraph["studentGraph"]):
+            student_id = self.get_student_id()
+            kcResultCursor = db.students.find({"_id" : student_id})
+            kcSlideResult = self.fetchKcFromStudentsCollection(kcResultCursor)
+            print "Test result"
+            result.append(kcSlideResult)
+            print result
+        else:
+            allStudents = db.students.find()
+            for key, idValue in enumerate(allStudents):
+                kcResultCursor = db.students.find({"_id": idValue.get('_id')})
+                kcSlideResult = self.fetchKcFromStudentsCollection(kcResultCursor)
+                print "Test result"
+                result.append({"student_id": idValue.get("_id"), "slides" :kcSlideResult})
+                print result
+        return result
 
     def calculateTotalWeight(self, quizWeight, patternWeight, suffix=''):
         """
         Calculate total weight for knowledge component on slide
         """
-        total = 0
-        print quizWeight
-        print patternWeight
-        total = quizWeight + patternWeight
-        print("Total")
-        print(total)
-        if total >= 80:
+        self.totalWeight = quizWeight + patternWeight
+        print ("Total")
+        print (quizWeight)
+        print (patternWeight)
+        if self.totalWeight >= 80:
             self.conditional_id = True
-        print("Conditional")
-        print(self.conditional_id)
 
     @XBlock.json_handler
     def to_send(self, data, suffix=''):
@@ -446,6 +495,20 @@ class ComplexHTMLXBlock(XBlock):
         Function that sends the condition of to proceed or not to next slide
         """
         return {"conditional_id" : self.conditional_id}
+
+    @XBlock.json_handler
+    def to_send_for_graph(self, data, suffix=''):
+        """
+        Function that sends kc and student_ids for graphs
+        """
+        return {"to_graph" : self.kcsToGraph(data)}
+
+    @XBlock.json_handler
+    def to_send_kc(self, data, suffix=''):
+        """
+        Function that sends the condition of to proceed or not to next slide
+        """
+        return {"kc" : self.totalWeight}
 
     def get_chapter(self):
         """
@@ -465,8 +528,9 @@ class ComplexHTMLXBlock(XBlock):
 
     def get_vertical(self):
         """
-       Get current vertical from parent runtime
-       """
+        Get current vertical from parent runtime
+        """
+        parent = self.get_parent()
         vertical = str(self.parent).split("/")[::-1][0]
         return vertical
 
@@ -756,11 +820,13 @@ class ComplexHTMLXBlock(XBlock):
     def get_quiz_attempts(self, data, suffix =''):
 
         correct_and_reason = {}
+        attempt_for_conditionals = 0
         quiz_attempts = {}
         attempt = 1
         body_json = json.loads(self.body_json)
         quizId = 0
         patternId = 0
+        slide_id = 0
         actionId = False
         student_id = self.get_student_id()
         print("Student_id")
@@ -775,10 +841,11 @@ class ComplexHTMLXBlock(XBlock):
                     patternId = value
                 if key == "actionId":
                     actionId = value
+                if key == "slide_id":
+                    slide_id = value
             print("Quiz value")
             quiz_type = data["ch_question"]["quiz_id"].split("_")
             quiz_attempts.update({'student_id' : student_id, 'quizid' : quizId, 'attempts' : attempt, "type": quiz_type[0]})
-            self.toStudentsCollection(quiz_attempts)
             self.qz_attempted = data['ch_question'].copy()
         for item in xrange(len(body_json["quizzes"])):
 
@@ -788,13 +855,10 @@ class ComplexHTMLXBlock(XBlock):
                 else:
                     correct_and_reason.update({'correct': 'false'})
         result = {"quizId": quizId, "patternId": patternId, "actionId": actionId}
+        attempt_for_conditionals = self.toStudentsCollection(quiz_attempts, correct_and_reason, slide_id)
         self.fetchPatternAndQuiz(result)
-        print("Queue")
-        print("Before")
-        print quiz_attempts
         print("End of attempts")
-        return {"quiz_result_id": correct_and_reason}
-
+        return {"quiz_result_id": correct_and_reason, "attempts": attempt_for_conditionals}
 
     def student_view(self, context=None):
         """
@@ -944,6 +1008,7 @@ class ComplexHTMLXBlock(XBlock):
 
             # NOTE: No validation going on here; be careful with your code
             self.display_name = data["display_name"]
+            self.vertical_name = data["display_name"]
             self.record_click = data["record_click"] == 1
             self.record_hover = data["record_hover"] == 1
             self.tick_interval = int(data["tick_interval"])
